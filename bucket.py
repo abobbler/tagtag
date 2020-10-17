@@ -4,31 +4,10 @@ import sys
 import os
 import argparse
 #from typing import NamedTuple
-from s3types.auth import AuthInfo
-from s3misc.PrintBucket import PrintBucket
+from s3misc.s3types.auth import AuthInfo
+import s3misc.BucketPrinter
 
-from s3misc.argparse_types import ArgParseChar
-
-def HooverAuth():
-    # Straight from ~/.aws/credentials!
-
-    if (os.path.isfile("~/.aws/credentials"):
-        return None
-
-    auth_access_key = None
-    auth_secret_key = None
-    with f = open("~/.aws/credentials"):
-        while (lin = f.readline()):
-            lin = l.split('=')
-
-            if (lin[0] == 'aws_access_key_id'):
-                auth_access_key = lin[1]
-            elif (lin[0] == 'aws_secret_access_key'):
-                auth_secret_key = lin[1]
-
-    if (auth_access_key is not None and auth_secret_key is not None):
-        return AuthInfo(ccess_key=auth_access_key, secret_key=auth_secret_key)
-    return None
+from s3misc.s3types.argparse_types import ArgParseChar
 
 def main():
     parser = argparse.ArgumentParser("List aws buckets.")
@@ -52,16 +31,21 @@ def main():
         auth_secret = input("AWS_SECRET_KEY: ")
 
         auth = Auth(access_key=args['access-key-id'], secret_key=auth_secret)
-    else:
-        auth = HooverAuth()
 
-    if (auth is None):
-        print(":-( Unable to get access key to list the bucket. Trying with no authentication. This will fail.")
 
-    #s3client = boto3.client('s3')
-
+    bucketprinter = s3misc.BucketPrinter.BucketPrinter(auth)
+    bucketprinter.Test()
     for bucket in args.bucket:
-        print(bucket)
+
+        bucketinfo = bucket.split(':')
+        if (len(bucketinfo) == 1):
+            bucketinfo = [bucketinfo[0], '']
+        params = dict()
+        delim = args.delim
+        if (args.recursive):
+            params['recursive'] = True
+
+        bucketprinter.PrintBucket(bucketinfo[0], delim, bucketinfo[1], **params)
 
 if (__name__ == '__main__'):
     main()

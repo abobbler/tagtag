@@ -31,7 +31,7 @@ def main():
     bucketprinter.Test()
     for bucket in args.bucket:
 
-        bucketinfo = bucket.split(':')
+        bucketinfo = bucket.split(':', 1)
         if (len(bucketinfo) == 1):
             bucketinfo = [bucketinfo[0], '']
 

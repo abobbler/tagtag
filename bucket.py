@@ -14,8 +14,12 @@ def main():
     
     parser.add_argument('--delim', type=ArgParseChar, default='/',
                 help='Delimiter for "directories" within object names.')
+    parser.add_argument('--block-size', type=int, default=-1,
+                help='Show size outputs in blocks of given size (default: auto)')
     parser.add_argument('--access-key-id', type=str,
                 help='AWS access key. If not provided, will be taken from ~/.aws/credentials. If provided, you will be prompted for the secret access key.')
+    parser.add_argument('--directory-totals', default=False, action="store_true",
+                help='Provide totals at the end of directories, in addition to at the end of bucket listing.')
     parser.add_argument('bucket', type=str, nargs='*',
                 help='Bucket(s) to list')
 
@@ -28,6 +32,11 @@ def main():
         auth = AuthInfo(access_key=args.access_key_id, secret_key=auth_secret)
 
     bucketprinter = s3misc.BucketPrinter.BucketPrinter(auth)
+    if (args.block_size > 0):
+        bucketprinter.SetBlockSize(args.block_size)
+    if (args.directory_totals):
+        bucketprinter.SetDirectoryTotals(True)
+
     bucketprinter.Test()
     for bucket in args.bucket:
 

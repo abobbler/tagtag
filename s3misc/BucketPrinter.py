@@ -34,66 +34,7 @@ def foursigfloat(num: int, units: List[str]):
         else:
             return ((str(num))[0:5] + " " + units[0])
 
-def DirectoryAccounting(dirstats: dict, curdir: str, delim: str, stats: List[int]):
-    """ Subtotal accounting: for each item in the path, add this directory's stats to
-    its parent.
-    """
-                
-    if (curdir not in dirstats):
-        # First time seeing this directory
-        dirstats[curdir] = stats
 
-    parentstats = None
-    while (curdir != '' and curdir is not None):
-        parentidx = curdir.rfind(delim, 0, len(curdir) - 1) + 1
-        if (parentidx > 0):
-            curdir = curdir[0:parentidx]
-        else:
-            curdir = ''
-
-        if (curdir not in dirstats):
-            # If parent dir contained no other files/directories (or they occurr after curdir)
-            dirstats[curdir] = [0,0,0,0]
-        parentstats = dirstats[curdir]
-
-        parentstats[2] = parentstats[2] + stats[0]
-        parentstats[3] = parentstats[3] + stats[1]
-
-
-def WrapUpDirectory(dirstats: dict, prevdir: str, delim: str, nextdir: str):
-    """ When you've encountered an item that is no longer within the current directory,
-        we need to wrap up the current directory, print its subtotals, and check to
-        see if we need to do likewise with the previous directory's parent, and parent's
-        parent as well.
-        """
-
-    # Is this a subdir of the previous directory? or should we subtotals the directory?
-    while (prevdir != nextdir[0:len(prevdir)]):
-        prevdirstats = dirstats[prevdir]
-        print(prevdir + " totals:")
-        print("{} directory objects; {} directory size".format(
-                                prevdirstats[0],
-                                foursigfloat(prevdirstats[1], bucket_units)))
-
-        # If there were sub directories, print out subtotals
-        if (prevdirstats[2] > 0):
-            print("    {} total subdirectory objects; {} total subdirectory size".format(
-                                prevdirstats[2],
-                                foursigfloat(prevdirstats[3], bucket_units)))
-
-        # keep our active directory count down.
-        if (prevdir != ''):
-            del dirstats[prevdir]
-        else:
-            break
-
-        # Next-previous, if the next->item is not within the previous dir's parent.
-        idx = prevdir.rfind(delim, 0, len(prevdir) - 1)
-        if (idx >= 0):
-            prevdir = prevdir[0:idx + 1]
-        else:
-            prevdir = ''
-        
 
 
 class BucketPrinter:
@@ -120,6 +61,11 @@ class BucketPrinter:
     # Path delimiter, if any
     _delim = None
 
+    # User-specified block size
+    _blocksize = -1
+
+    # Totals for each directory? or only the whole listing?
+    _dirtotals = False
 
     def __init__(self, authinfo: AuthInfo):
         """ Authinfo may be none. If it is, we'll try parsing it from ~/.aws/credentials. """
@@ -175,7 +121,7 @@ class BucketPrinter:
         prevlen = -1
         nextlen = 0
         nextdir = None
-        stats = [0, 0, 0, 0]
+        stats = [0, 0, 0, 0, None]
 
         for item in items:
             boolnew = False
@@ -186,20 +132,20 @@ class BucketPrinter:
                 # Then we have just exited a directory.
 
                 # Subtotals now include the just-completed directory
-                DirectoryAccounting(dirstats, prevdir, self._delim, stats)
+                self.DirectoryAccounting(dirstats, prevdir, stats)
 
                 # Print out subtotals.
-                WrapUpDirectory(dirstats, prevdir, self._delim, nextdir)
+                if (self._dirtotals):
+                    self.WrapUpDirectory(dirstats, prevdir, nextdir)
 
                 # this is a new directory. Create fresh stats.
-                if (nextdir not in dirstats):
-                    dirstats[nextdir] = [0, 0, 0, 0]
+                dirstats[nextdir] = [0, 0, 0, 0, None]
                 stats = dirstats[nextdir]
 
                 boolnew = True
             elif (nextlen > prevlen):
                 # Then we have a new subdirectory.
-                dirstats[nextdir] = [0, 0, 0, 0]
+                dirstats[nextdir] = [0, 0, 0, 0, None]
                 stats = dirstats[nextdir]
                 boolnew = True
 
@@ -211,41 +157,38 @@ class BucketPrinter:
                 print()
                 print(item['Key'][0:nextlen] + ":")
 
+            # this array was simpler when I started, but I didn't want to change it to dict:
+            # 0: number of files in current directory
+            # 1: size of current directory
+            # 2: number of files in subdirectories
+            # 3: size of files in subdirs
+            # 4: greatest date in this directory (or subdirs)
             stats[0] = stats[0] + 1
             stats[1] = stats[1] + item['Size']
+            stats[4] = max(stats[4], item['LastModified']) if (stats[4]) else item['LastModified']
 
             keyname = item['Key'][prevlen:]
             if (len(keyname) == 0):
                 keyname = "<directory object>"
             # size.1 GB 2020-05-22: MyEntry.txt
-            print(foursigfloat(item['Size'], bucket_units) + " " + str(item['LastModified']) + ": " + keyname)
+            lastmod = item['LastModified'].strftime('%Y-%m-%d %H:%M:%S')
+            if (self._blocksize == -1):
+                itemsize = foursigfloat(item['Size'], bucket_units)
+            else:
+                itemsize = '{:0.0f} blocks'.format(item['Size'] / self._blocksize)
+            print("{} {}: {}".format(itemsize, lastmod, keyname))
 
         # We've exhausted all directories.
 
         # Finish accounting for all of the last directories
         finaldir = prevdir
         while (prevdir != ''):
-            DirectoryAccounting(dirstats, prevdir, self._delim, stats)
+            self.DirectoryAccounting(dirstats, prevdir, stats)
             idx = prevdir.rfind(self._delim, 0, -1) + 1
             prevdir = prevdir[0:idx]
 
-        WrapUpDirectory(dirstats, finaldir, self._delim, '')
+        self.WrapUpDirectory(dirstats, finaldir, '')
         
-        print("\nBucket totals:")
-        if ('' in dirstats):
-            # If we're listing the whole bucket..
-            stats = dirstats['']
-            print("{} directory objects; {} directory size".format(
-                                    stats[0],
-                                    foursigfloat(stats[1], bucket_units)))
-
-            # If there were sub directories, print out subtotals
-            if (stats[2] > 0):
-                print("    {} total subdirectory objects; {} total subdirectory size".format(
-                                    stats[2],
-                                    foursigfloat(stats[3], bucket_units)))
-
-
     def ParseBucket(self, bucket: str):
         """ Get and process a list of objects from a bucket.
 
@@ -342,31 +285,136 @@ class BucketPrinter:
         # Does the prefix match? Yes, of course it does, by definition...
         matchmaybe = key[matchinfo[0]:]
 
-        # easy condition: if we didn't include a wildcard, and the prefix is followed by (or
-        # ends with) a delimeter, then we match if there is no other delimeter
         if (len(matchinfo[1]) == 0):
-            if (len(matchmaybe) == 0):
-                # the match was a prefix, and this key matches that prefix exactly.
-                return True
-            elif (matchmaybe[0] == self._delim and (self._recursive or
-                        len(matchmaybe) > 0 and matchmaybe.find(self._delim, 1) > 0)):
-                # matchprefix wasn't a directory but we found it to be one
-                return True
-            elif (matchinfo[0] > 0 and key[matchinfo[0] - 1] == self._delim and
-                        (self._recursive or len(matchmaybe) > 0 and matchmaybe.find(self._delim, 1) > 0)):
-                # matchprefix is a directory and this is a file under it
-                return True
-            else:
-                # This is /path/to/myfileEXTRA
-                # and I only want /path/to/myfile
-                return False
+            # No wilds, this is a prefix match.
+            # Is it a directory?
+            if (key[matchinfo[0] - 1] == self._delim):
+                # Delimiter included in prefix
+                return (self._recursive or (matchmaybe.find(self._delim) < 0))
 
-        # Is this object a subdirectory? We don't match any part of subdirectories.
+            if (matchmaybe[0] == self._delim):
+                # Given on the command line was a directory without the delimiter;
+                matchmaybe = matchmaybe[1:]
+
+            if (len(matchmaybe) == 0 or self._recursive or matchmaybe.find(self._delim) < 0):
+                # We're a directory, we're recursing, or we don't have another delimiter
+                return True
+
+            # Else, there's no wild portion, matchmaybe doesn't start with a delimiter,
+            # (or we aren't recursing and there's another one).
+            # Then either we have a delimiter where we shouldn't or we have text instead of a
+            # delimiter. Stop.
+            return False
+
+        # Else, we have a wild match portion.
+
+        # We're not matching through delimiters, so false if there is one.
         if (matchmaybe.find(self._delim) >= 0):
             return False
 
         # Lastly, does this object actually match the wild portion?
         return fnmatch.fnmatch(matchmaybe, matchinfo[1])
+
+    def DirectoryAccounting(self, dirstats: dict, curdir: str, stats: List[int]):
+        """ Subtotal accounting: for each item in the path, add this directory's stats to
+        its parent.
+        """
+                    
+        if (curdir not in dirstats):
+            # First time seeing this directory
+            dirstats[curdir] = stats
+
+        parentstats = None
+        while (curdir != '' and curdir is not None):
+            parentidx = curdir.rfind(self._delim, 0, len(curdir) - 1) + 1
+            curdir = curdir[0:parentidx]
+
+            if (curdir not in dirstats):
+                # If parent dir contained no other files/directories (or they occur after curdir)
+                dirstats[curdir] = [0,0,0,0,None]
+            parentstats = dirstats[curdir]
+
+            # Add the objects and size to each parent directory
+            parentstats[2] = parentstats[2] + stats[0]
+            parentstats[3] = parentstats[3] + stats[1]
+
+            # Last modified
+            parentstats[4] = max(parentstats[4], stats[4]) if (parentstats[4]) else stats[4]
+
+    def WrapUpDirectory(self, dirstats: dict, prevdir: str, nextdir: str):
+        """ When you've encountered an item that is no longer within the current directory,
+            we need to wrap up the current directory, print its subtotals, and check to
+            see if we need to do likewise with the previous directory's parent, and parent's
+            parent as well.
+
+            prevdir: the previous directory that you were working with.
+            nextdir: the next directory that you will work with (not file).
+            lastitem: if there is no "next item" and this is the end of the bucket.
+            """
+
+        # Because we're working with directories and not files, we can't prune the file from the directory
+        # first. We need a "do while".
+        bucketsummary = False
+        if (nextdir == ''):
+            bucketsummary = True
+
+        # Is this a subdir of the previous directory? or should we subtotals the directory?
+        while (prevdir != nextdir[0:len(prevdir)] or bucketsummary):
+            prevdirstats = dirstats[prevdir]
+
+            if (prevdir == ''):
+                # We're in the last stage! Do-while, last loop through.
+                bucketsummary = False
+
+            # end-of-bucket impacts us here, too. If not printing out directory totals,
+            # only print out subdirectory stats.
+            if (prevdir != '' and self._dirtotals):
+                if (self._blocksize == -1):
+                    blocks = foursigfloat(prevdirstats[1], bucket_units)
+                else:
+                    blocks = "{} blocks".format(prevdirstats[1] / self._blocksize)
+
+                print(prevdir + " totals:")
+                print("{} directory objects; {} directory size".format(prevdirstats[0], blocks))
+
+            # If there were sub directories, print out subtotals
+            if (prevdirstats[2] > 0):
+                if (self._blocksize == -1):
+                    blocks = foursigfloat(prevdirstats[3], bucket_units)
+                else:
+                    blocks = "{} blocks".format(prevdirstats[3] / self._blocksize)
+
+                if (prevdir == ''):
+                    print()
+                dirorbucket = 'subdirectory' if (prevdir != '') else 'bucket'
+                print("    {} total {} objects; {} total subdirectory size".format(
+                                    prevdirstats[2], dirorbucket, blocks))
+
+            if (self._dirtotals or prevdir == ''):
+                print("    Latest modification: {}".format(prevdirstats[4]))
+
+            # keep our active directory count down.
+            if (prevdir != ''):
+                del dirstats[prevdir]
+            else:
+                break
+
+            # Next-previous, if the next->item is not within the previous dir's parent.
+            idx = prevdir.rfind(self._delim, 0, len(prevdir) - 1)
+            if (idx >= 0):
+                prevdir = prevdir[0:idx + 1]
+            else:
+                prevdir = ''
+            
+
+    def SetDirectoryTotals(self, totals: bool):
+        """ Whether to show totals at the end of each directory or only at the end of the listing """
+        self._dirtotals = totals
+
+    def SetBlockSize(self, size: int):
+        if (size <= 0 and size != -1):
+            raise ValueError("Given size ({}) for SetBlockSize is invalid. -1 for auto, or positive integer.")
+        self._blocksize = size
 
 
     def Test(self):
@@ -377,60 +425,60 @@ class BucketPrinter:
         self._delim = '/'
 
         dirstats = dict( {
-                '/test/ing/123/': [0,0,0,0],
-                '/test/ing/456/': [0,0,0,0],
-                '/test/ing/': [0,0,0,0],
-                '/test/': [0,0,0,0],
-                '/': [0,0,0,0]
+                '/test/ing/123/': [0,0,0,0, datetime.datetime.min],
+                '/test/ing/456/': [0,0,0,0, datetime.datetime.min],
+                '/test/ing/': [0,0,0,0, datetime.datetime.min],
+                '/test/': [0,0,0,0, datetime.datetime.min],
+                '/': [0,0,0,0, datetime.datetime.min]
             })
         stats = dirstats['/test/ing/123/']
         stats[0] = stats[0] + 1
         stats[1] = stats[1] + 1
-        DirectoryAccounting(dirstats, '/test/ing/123/', '/', stats)
+        self.DirectoryAccounting(dirstats, '/test/ing/123/', stats)
         stats = dirstats['/test/ing/456/']
         stats[0] = stats[0] + 2
         stats[1] = stats[1] + 3
-        DirectoryAccounting(dirstats, '/test/ing/456/', '/', stats)
+        self.DirectoryAccounting(dirstats, '/test/ing/456/', stats)
         stats = dirstats['/test/ing/']
         stats[0] = stats[0] + 1
         stats[1] = stats[1] + 3
-        DirectoryAccounting(dirstats, '/test/ing/', '/', stats)
+        self.DirectoryAccounting(dirstats, '/test/ing/', stats)
         stats = dirstats['/test/']
         stats[0] = stats[0] + 1
         stats[1] = stats[1] + 1
-        DirectoryAccounting(dirstats, '/test/', '/', stats)
+        self.DirectoryAccounting(dirstats, '/test/', stats)
         stats = dirstats['/']
         stats[0] = stats[0] + 1
         stats[1] = stats[1] + 1
-        DirectoryAccounting(dirstats, '/', '/', stats)
-        assert(dirstats['/test/ing/'] == list((1,3,3,4)))
-        assert(dirstats['/'] == list((1,1,5,8)))
+        self.DirectoryAccounting(dirstats, '/', stats)
+        assert(list(dirstats['/test/ing/'][0:4]) == list((1,3,3,4)))
+        assert(list(dirstats['/'][0:4]) == list((1,1,5,8)))
         dirstats = dict({
-                 'test/ing/123/': [0,0,0,0],
-                 'test/ing/456/': [0,0,0,0],
-                 'test/ing/': [0,0,0,0],
-                 'test/': [0,0,0,0]
+                 'test/ing/123/': [0,0,0,0, datetime.datetime.min],
+                 'test/ing/456/': [0,0,0,0, datetime.datetime.min],
+                 'test/ing/': [0,0,0,0, datetime.datetime.min],
+                 'test/': [0,0,0,0, datetime.datetime.min]
             })
         stats = dirstats['test/ing/123/']
         stats[0] = stats[0] + 1
         stats[1] = stats[1] + 1
-        DirectoryAccounting(dirstats, 'test/ing/123/', '/', stats)
+        self.DirectoryAccounting(dirstats, 'test/ing/123/', stats)
         stats = dirstats['test/ing/456/']
         stats[0] = stats[0] + 2
         stats[1] = stats[1] + 3
-        DirectoryAccounting(dirstats, 'test/ing/456/', '/', stats)
+        self.DirectoryAccounting(dirstats, 'test/ing/456/', stats)
         stats = dirstats['test/ing/']
         stats[0] = stats[0] + 1
         stats[1] = stats[1] + 3
-        DirectoryAccounting(dirstats, 'test/ing/', '/', stats)
+        self.DirectoryAccounting(dirstats, 'test/ing/', stats)
         stats = dirstats['test/']
         stats[0] = stats[0] + 1
         stats[1] = stats[1] + 1
-        DirectoryAccounting(dirstats, 'test/', '/', stats)
-        assert(dirstats['test/ing/'] == list((1,3,3,4)))
-        assert(dirstats[''] == list((0,0,5,8)))
+        self.DirectoryAccounting(dirstats, 'test/', stats)
+        assert(list(dirstats['test/ing/'][0:4]) == list((1,3,3,4)))
+        assert(list(dirstats[''][0:4]) == list((0,0,5,8)))
         dirstats = dict()
-        DirectoryAccounting(dirstats, 'test/', '/', [1,1,0,0]) 
+        self.DirectoryAccounting(dirstats, 'test/', [1,1,0,0,datetime.datetime.min]) 
 
         assert(self.BucketMatch('/test/ing/123') == '/test/ing/123')
         assert(self.BucketMatch('/test/ing/123?') == '/test/ing/123')
@@ -457,11 +505,15 @@ class BucketPrinter:
 
         self._recursive = False
         self.BucketMatch('/buc/ket/stuff')
-        assert(not self.KeyMatch('/buc/ket/stuff/'))
+        assert(self.KeyMatch('/buc/ket/stuff/'))
         self.BucketMatch('/buc/ket/stuff')
-        assert(not self.KeyMatch('/buc/ket/stuff/subfile'))
+        assert(self.KeyMatch('/buc/ket/stuff/subfile'))
+        self.BucketMatch('/buc/ket/stuff')
+        assert(not self.KeyMatch('/buc/ket/stuff/subfile/file2'))
         self.BucketMatch('/buc/ket/stuff/')
-        assert(not self.KeyMatch('/buc/ket/stuff/subfile'))
+        assert(self.KeyMatch('/buc/ket/stuff/subfile'))
+        self.BucketMatch('/buc/ket/stuff/')
+        assert(not self.KeyMatch('/buc/ket/stuff/subfile/file2'))
 
         self._recursive = True
         self.BucketMatch('/buc/ket/stuff')
@@ -490,7 +542,7 @@ class BucketPrinter:
                         'LastModified': datetime.datetime.today()
                     })
                 yield myitem
-                for j in (range(1,5)):
+                for j in (range(1,20)):
                     myitem = dict({
                             'Key': 'img_' + str(i) + '/img_' + str(j) + '.jpg',
                         'Size': 78364876,

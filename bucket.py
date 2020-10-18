@@ -12,12 +12,6 @@ from s3misc.argparse_types import ArgParseChar
 def main():
     parser = argparse.ArgumentParser("List aws buckets.")
     
-    parser.add_argument('--sort', choices=['time','size','name'],
-                help='Sort by <what>.')
-    parser.add_argument('-R', type=bool, dest='reverse',
-                help='Sort in reverse.')
-    parser.add_argument('-r', type=bool, dest='recursive',
-                help='List bucket recursively.')
     parser.add_argument('--delim', type=ArgParseChar, default='/',
                 help='Delimiter for "directories" within object names.')
     parser.add_argument('--access-key-id', type=str,
@@ -37,14 +31,12 @@ def main():
     bucketprinter.Test()
     for bucket in args.bucket:
 
-        print("Bucket!")
         bucketinfo = bucket.split(':')
         if (len(bucketinfo) == 1):
             bucketinfo = [bucketinfo[0], '']
+
         params = dict()
         delim = args.delim
-        if (args.recursive):
-            params['recursive'] = True
 
         print("Printing bucket: " + bucketinfo[0])
         bucketprinter.PrintBucket(bucketinfo[0], delim, bucketinfo[1], **params)

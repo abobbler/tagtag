@@ -4,10 +4,10 @@ import sys
 import os
 import argparse
 #from typing import NamedTuple
-from s3misc.s3types.auth import AuthInfo
+from s3misc.auth import AuthInfo
 import s3misc.BucketPrinter
 
-from s3misc.s3types.argparse_types import ArgParseChar
+from s3misc.argparse_types import ArgParseChar
 
 def main():
     parser = argparse.ArgumentParser("List aws buckets.")
@@ -27,16 +27,17 @@ def main():
 
     args = parser.parse_args()
 
-    if (args['access-key-id']):
-        auth_secret = input("AWS_SECRET_KEY: ")
+    auth = None
+    if (args.access_key_id):
+        auth_secret = input("AWS_SECRET_KEY (NOT INVISIBLE!!): ")
 
-        auth = Auth(access_key=args['access-key-id'], secret_key=auth_secret)
-
+        auth = AuthInfo(access_key=args.access_key_id, secret_key=auth_secret)
 
     bucketprinter = s3misc.BucketPrinter.BucketPrinter(auth)
     bucketprinter.Test()
     for bucket in args.bucket:
 
+        print("Bucket!")
         bucketinfo = bucket.split(':')
         if (len(bucketinfo) == 1):
             bucketinfo = [bucketinfo[0], '']
@@ -45,6 +46,7 @@ def main():
         if (args.recursive):
             params['recursive'] = True
 
+        print("Printing bucket: " + bucketinfo[0])
         bucketprinter.PrintBucket(bucketinfo[0], delim, bucketinfo[1], **params)
 
 if (__name__ == '__main__'):

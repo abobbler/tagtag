@@ -4,3 +4,4 @@ from argparse import ArgumentTypeError
 def ArgParseChar(value):
     if (len(value) != 1):
         raise ArgumentTypeError("The given value is not exactly one character")
+    return value

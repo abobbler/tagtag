@@ -342,18 +342,18 @@ class BucketPrinter:
         # Does the prefix match? Yes, of course it does, by definition...
         matchmaybe = key[matchinfo[0]:]
 
-        # Special case: base-case
-        if (len(matchmaybe) == 0 or matchinfo[0] == 0):
-            return True
-
         # easy condition: if we didn't include a wildcard, and the prefix is followed by (or
         # ends with) a delimeter, then we match if there is no other delimeter
         if (len(matchinfo[1]) == 0):
-            if (matchmaybe[0] == self._delim and (self._recursive or matchmaybe.find(self._delim, 1) > 0)):
+            if (len(matchmaybe) == 0):
+                # the match was a prefix, and this key matches that prefix exactly.
+                return True
+            elif (matchmaybe[0] == self._delim and (self._recursive or
+                        len(matchmaybe) > 0 and matchmaybe.find(self._delim, 1) > 0)):
                 # matchprefix wasn't a directory but we found it to be one
                 return True
             elif (matchinfo[0] > 0 and key[matchinfo[0] - 1] == self._delim and
-                        (self._recursive or matchmaybe.find(self._delim, 1) > 0)):
+                        (self._recursive or len(matchmaybe) > 0 and matchmaybe.find(self._delim, 1) > 0)):
                 # matchprefix is a directory and this is a file under it
                 return True
             else:
@@ -435,6 +435,16 @@ class BucketPrinter:
         assert(self.BucketMatch('/test/ing/123') == '/test/ing/123')
         assert(self.BucketMatch('/test/ing/123?') == '/test/ing/123')
         assert(self.BucketMatch('/test/ing/*') == '/test/ing/')
+
+        self.BucketMatch('IMG_4700/')
+        assert(self.KeyMatch('IMG_4700/IMG_4783.jpg'))
+        # This will pass because there's no wild. The bucket listing will include `IMG_4700`
+        # as the prefix, and that's an assumption in the matcher: it doesn't consider the prefix.
+        assert(self.KeyMatch('IMG_4800/IMG_4783.jpg'))
+        self.BucketMatch('IMG_4700/*83*')
+        assert(self.KeyMatch('IMG_4700/IMG_4783.jpg'))
+        assert(not self.KeyMatch('IMG_4800/IMG_4733.jpg'))
+        
 
         self.BucketMatch('/buc/ket/stuff*')
         assert(self.KeyMatch('/buc/ket/stuff'))
